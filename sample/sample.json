@@ -1,0 +1,73 @@
+{
+    "structs": [
+        {
+            "fields": [
+                {
+                    "name": "x",
+                    "type": "string"
+                },
+                {
+                    "name": "y",
+                    "type": "int"
+                }
+            ],
+            "name": "Bar"
+        },
+        {
+            "fields": [
+                {
+                    "name": "a",
+                    "type": "int"
+                },
+                {
+                    "name": "b",
+                    "tags": {
+                        "db": "beta"
+                    },
+                    "type": "string"
+                },
+                {
+                    "name": "c",
+                    "type": "*int"
+                },
+                {
+                    "name": "d",
+                    "tags": {
+                        "db": "delta",
+                        "json": "Delta"
+                    },
+                    "type": "[]string"
+                },
+                {
+                    "name": "e",
+                    "type": "map[string]int"
+                },
+                {
+                    "name": "f",
+                    "type": "map[int]Bar"
+                }
+            ],
+            "name": "Foo"
+        },
+        {
+            "fields": [
+                {
+                    "type": "Foo"
+                },
+                {
+                    "name": "fset",
+                    "type": "*token.FileSet"
+                },
+                {
+                    "name": "CreatedAt",
+                    "type": "time.Time"
+                },
+                {
+                    "name": "UpdatedByID",
+                    "type": "int64"
+                }
+            ],
+            "name": "Boink"
+        }
+    ]
+}

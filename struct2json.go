@@ -8,6 +8,8 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"reflect"
+	"strings"
 )
 
 // Tree is a shortcut for map string->something
@@ -29,255 +31,147 @@ func Tr(name string, value interface{}) Tree {
 
 func main() {
 
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "usage: struct2json filename.go StructName\n")
+	goFiles := []string{}
+	structNames := [][]string{}
+
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: struct2json f1.go structName ... f2.go structName ...\n")
 		os.Exit(1)
 	}
 
-	dumpStruct(os.Args[1], os.Args[2])
-}
+	thisGoName := ""
+	theseNames := []string{}
+	for _, arg := range os.Args[1:] {
 
-func dumpStruct(filename, structName string) {
-
-	fset := token.NewFileSet()
-	mode := parser.Mode(0)
-
-	result, err := parser.ParseFile(fset, filename, nil, mode)
-	if err != nil {
-		log.Fatalf("failed parsing %s: %v", filename, err)
-	}
-
-	structFields, ok := findStruct(structName, result.Decls)
-	if !ok {
-		log.Fatalf("struct %s not found in %s", structName, filename)
-	}
-
-	definition := Tr("name", structName)
-
-	fields := []Tree{}
-
-	for _, fld := range structFields.List {
-		for _, name := range fld.Names {
-
-			nxt := Tr("field", name.Name)
-			nxt["type"] = handleType(fset, fld.Type)
-
-			fields = append(fields, nxt)
+		if !strings.HasSuffix(arg, ".go") {
+			theseNames = append(theseNames, arg)
+			continue
 		}
+
+		if thisGoName != "" {
+			goFiles = append(goFiles, thisGoName)
+			structNames = append(structNames, theseNames)
+		}
+
+		thisGoName = arg
+		theseNames = []string{}
+	}
+	goFiles = append(goFiles, thisGoName)
+	structNames = append(structNames, theseNames)
+
+	results := []Tree{}
+
+	for i, goFileName := range goFiles {
+		results = append(results, getStructs(goFileName, structNames[i])...)
 	}
 
-	definition["fields"] = fields
-
-	// switch it := decl.(type) {
-	// case *ast.GenDecl:
-	// 	declarations = append(declarations, handleGenDecl(fset, it))
-	// case *ast.FuncDecl:
-	// 	declarations = append(declarations, handleFuncDecl(fset, it))
-	// default:
-	// 	declarations = append(declarations, Tree{
-	// 		"unhandledDeclarationType": fmt.Sprintf("%T", decl),
-	// 	})
-	// }
-
-	output, err := json.MarshalIndent(definition, "", "    ")
+	output, err := json.MarshalIndent(Tr("structs", results), "", "    ")
 	if err != nil {
-		log.Fatalf("failed to marshal parse tree to JSON for %s: %v", filename, err)
+		log.Fatalf("failed to struct definition(s): %v", err)
 	}
 
 	fmt.Println(string(output))
 }
 
-func findStruct(structName string, decls []ast.Decl) (*ast.FieldList, bool) {
+func getStructs(goFileName string, structNames []string) []Tree {
 
-	for _, decl := range decls {
+	fset := token.NewFileSet()
+	mode := parser.Mode(0)
 
-		structFields, ok := getStructFields(structName, decl)
-		if ok {
-			return structFields, true
+	parsed, err := parser.ParseFile(fset, goFileName, nil, mode)
+	if err != nil {
+		log.Fatalf("failed parsing %s: %v", goFileName, err)
+	}
+
+	structs := findStructs(fset, parsed.Decls)
+
+	result := []Tree{}
+
+	for structName, fields := range structs {
+
+		if len(structNames) > 0 && !contains(structNames, structName) {
+			continue
+		}
+
+		definition := Tr("name", structName)
+		definition = definition.merge(fields)
+
+		result = append(result, definition)
+	}
+
+	return result
+}
+
+func contains(coll []string, item string) bool {
+	for _, each := range coll {
+		if each == item {
+			return true
 		}
 	}
 
-	return nil, false
+	return false
 }
 
-func getStructFields(structName string, declNode ast.Node) (*ast.FieldList, bool) {
+func findStructs(fset *token.FileSet, decls []ast.Decl) map[string]Tree {
+
+	results := map[string]Tree{}
+
+	for _, decl := range decls {
+
+		structName, structFields, ok := getStructNameAndFields(fset, decl)
+		if ok {
+			results[structName] = Tr("fields", handleFieldList(fset, structFields.List))
+		}
+	}
+
+	return results
+}
+
+func getStructNameAndFields(fset *token.FileSet, declNode ast.Node) (string, *ast.FieldList, bool) {
 
 	genDecl, ok := declNode.(*ast.GenDecl)
 	if !ok {
-		return nil, false
+		return "", nil, false
 	}
 
 	if len(genDecl.Specs) != 1 {
-		return nil, false
+		return "", nil, false
 	}
 
 	typeSpec, ok := genDecl.Specs[0].(*ast.TypeSpec)
 	if !ok {
-		return nil, false
+		return "", nil, false
 	}
 
-	if typeSpec.Name.Name != structName {
-		return nil, false
+	structName := typeSpec.Name.Name
+	if structName == "" {
+		return "", nil, false
 	}
 
 	structType, ok := typeSpec.Type.(*ast.StructType)
 	if !ok {
-		return nil, false
+		return "", nil, false
 	}
 
-	return structType.Fields, true
+	return structName, structType.Fields, true
 }
 
-func handleGenDecl(fset *token.FileSet, it *ast.GenDecl) Tree {
-
-	switch it.Tok {
-	case token.TYPE:
-		results := []Tree{}
-		for _, spec := range it.Specs {
-			results = append(results, handleTypeSpec(fset, spec.(*ast.TypeSpec)))
-		}
-		if len(results) == 1 {
-			return results[0]
-		}
-		return Tr("type", results)
-	case token.IMPORT:
-		return Tr("imports", "...")
-	default:
-		return Tr("unhandledGenDeclToken", it.Tok.String())
-	}
-}
-
-func handleTypeSpec(fset *token.FileSet, it *ast.TypeSpec) Tree {
-
-	tree := Tree{}
-
-	tree["name"] = it.Name.Name
-	t := handleType(fset, it.Type)
-
-	if tr, ok := t.(Tree); ok {
-		tree = tree.merge(tr)
-	} else {
-		tree["type"] = t
-	}
-
-	return tree
-}
-
-func handleType(fset *token.FileSet, it ast.Expr) interface{} {
+func handleType(fset *token.FileSet, it ast.Expr) string {
 
 	switch x := it.(type) {
 	case *ast.Ident:
 		return x.String()
-	case *ast.StructType:
-		return Tr("struct", handleStructType(fset, x))
 	case *ast.ArrayType:
-		return Tr("array", handleType(fset, x.Elt))
+		return "[]" + handleType(fset, x.Elt)
 	case *ast.StarExpr:
-		return Tr("star", handleType(fset, x.X))
-	case *ast.InterfaceType:
-		return Tr("interface", handleMethods(fset, x.Methods))
+		return "*" + handleType(fset, x.X)
 	case *ast.SelectorExpr:
-		return Tree{
-			"pre": fmt.Sprintf("%s", handleType(fset, x.X)),
-			"sel": x.Sel.String(),
-		}
-	case *ast.FuncType:
-		return handleFuncType(fset, x)
+		return handleType(fset, x.X) + "." + x.Sel.String()
 	case *ast.MapType:
-		return Tree{
-			"type":  "map",
-			"key":   handleType(fset, x.Key),
-			"value": handleType(fset, x.Value),
-		}
+		return "map[" + handleType(fset, x.Key) + "]" + handleType(fset, x.Value)
 	default:
-		return Tr("unhandledType", fmt.Sprintf("%T", it))
+		return "unhandledType " + fmt.Sprintf("%T", it)
 	}
-}
-
-func handleMethods(fset *token.FileSet, it *ast.FieldList) Tree {
-
-	meths := []Tree{}
-	composed := []Tree{}
-
-	for _, x := range it.List {
-
-		if f, ok := x.Type.(*ast.Ident); ok {
-			composed = append(composed, Tr("name", f.Name))
-			continue
-		}
-
-		if len(x.Names) == 0 {
-			ast.Print(fset, x)
-			continue
-		}
-
-		t := Tr("name", x.Names[0].Name)
-		methType := handleType(fset, x.Type)
-		if y, ok := methType.(Tree); ok {
-			t = t.merge(y)
-		} else {
-			t["type"] = methType
-		}
-		meths = append(meths, t)
-	}
-
-	r := Tree{}
-
-	if len(meths) > 0 {
-		r["methods"] = meths
-	}
-
-	if len(composed) > 0 {
-		r["composed"] = composed
-	}
-
-	return r
-}
-
-func handleStructType(fset *token.FileSet, it *ast.StructType) Tree {
-
-	// ast.Print(fset, it)
-
-	fields := []Tree{}
-
-	for _, fld := range it.Fields.List {
-		for _, name := range fld.Names {
-			t := Tree{
-				"name": name.Name,
-				"type": handleType(fset, fld.Type),
-			}
-			if fld.Tag != nil {
-				t["tag"] = fld.Tag.Value[1 : len(fld.Tag.Value)-1]
-			}
-			fields = append(fields, t)
-		}
-	}
-
-	return Tr("fields", fields)
-}
-
-func handleFuncType(fset *token.FileSet, it *ast.FuncType) Tree {
-
-	t := Tree{}
-
-	if it.Params != nil && len(it.Params.List) > 0 {
-		t["params"] = handleFieldList(fset, it.Params.List)
-	}
-
-	if it.Results != nil && len(it.Results.List) > 0 {
-		t["results"] = handleFieldList(fset, it.Results.List)
-	}
-
-	return t
-}
-
-func handleFuncDecl(fset *token.FileSet, it *ast.FuncDecl) Tree {
-
-	t := Tr("func", it.Name.Name)
-
-	t = t.merge(handleFuncType(fset, it.Type))
-
-	return t
 }
 
 func handleFieldList(fset *token.FileSet, it []*ast.Field) []Tree {
@@ -294,12 +188,40 @@ func handleFieldList(fset *token.FileSet, it []*ast.Field) []Tree {
 
 		t["type"] = handleType(fset, fld.Type)
 
-		if fld.Tag != nil {
-			t["tag"] = fld.Tag.Value[1 : len(fld.Tag.Value)-1]
-		}
+		t = t.merge(handleFieldTag(fset, fld.Tag))
 
 		fields = append(fields, t)
 	}
 
 	return fields
+}
+
+func handleFieldTag(fset *token.FileSet, it *ast.BasicLit) Tree {
+
+	r := Tree{}
+
+	if it == nil {
+		return r
+	}
+
+	tag := reflect.StructTag(it.Value[1 : len(it.Value)-1])
+
+	tagValues := Tree{}
+
+	for _, t := range []string{
+		// see https://github.com/golang/go/wiki/Well-known-struct-tags
+		"xml", "json", "asn1", "reform", "dynamodb", "bigquery", "datastore", "spanner", "bson",
+		"gorm", "yaml", "validate", "mapstructure", "protobuf", "db",
+	} {
+		v, ok := tag.Lookup(t)
+		if ok {
+			tagValues[t] = v
+		}
+	}
+
+	if len(tagValues) > 0 {
+		r["tags"] = tagValues
+	}
+
+	return r
 }
