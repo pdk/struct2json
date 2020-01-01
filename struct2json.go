@@ -12,21 +12,22 @@ import (
 	"strings"
 )
 
-// Tree is a shortcut for map string->something
-type Tree map[string]interface{}
-
-func (t Tree) merge(other Tree) Tree {
-	for k, v := range other {
-		t[k] = v
-	}
-	return t
+// StructsDocument contains a series of StructDefs
+type StructsDocument struct {
+	Structs []StructDef `json:"structs"`
 }
 
-// Tr is a shortcut Tree builder
-func Tr(name string, value interface{}) Tree {
-	return Tree{
-		name: value,
-	}
+// StructDef contains a name, and a series of FieldDefs
+type StructDef struct {
+	Name   string     `json:"name"`
+	Fields []FieldDef `json:"fields"`
+}
+
+// FieldDef contains a name, a type, and possibly some Tags
+type FieldDef struct {
+	Name string            `json:"name"`
+	Type string            `json:"type"`
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 func main() {
@@ -59,13 +60,13 @@ func main() {
 	goFiles = append(goFiles, thisGoName)
 	structNames = append(structNames, theseNames)
 
-	results := []Tree{}
+	doc := StructsDocument{}
 
 	for i, goFileName := range goFiles {
-		results = append(results, getStructs(goFileName, structNames[i])...)
+		doc.Structs = append(doc.Structs, getStructs(goFileName, structNames[i])...)
 	}
 
-	output, err := json.MarshalIndent(Tr("structs", results), "", "    ")
+	output, err := json.MarshalIndent(doc, "", "    ")
 	if err != nil {
 		log.Fatalf("failed to struct definition(s): %v", err)
 	}
@@ -73,7 +74,7 @@ func main() {
 	fmt.Println(string(output))
 }
 
-func getStructs(goFileName string, structNames []string) []Tree {
+func getStructs(goFileName string, structNames []string) []StructDef {
 
 	fset := token.NewFileSet()
 	mode := parser.Mode(0)
@@ -85,18 +86,15 @@ func getStructs(goFileName string, structNames []string) []Tree {
 
 	structs := findStructs(fset, parsed.Decls)
 
-	result := []Tree{}
+	result := []StructDef{}
 
-	for structName, fields := range structs {
+	for structName, structDef := range structs {
 
 		if len(structNames) > 0 && !contains(structNames, structName) {
 			continue
 		}
 
-		definition := Tr("name", structName)
-		definition = definition.merge(fields)
-
-		result = append(result, definition)
+		result = append(result, structDef)
 	}
 
 	return result
@@ -112,15 +110,18 @@ func contains(coll []string, item string) bool {
 	return false
 }
 
-func findStructs(fset *token.FileSet, decls []ast.Decl) map[string]Tree {
+func findStructs(fset *token.FileSet, decls []ast.Decl) map[string]StructDef {
 
-	results := map[string]Tree{}
+	results := map[string]StructDef{}
 
 	for _, decl := range decls {
 
 		structName, structFields, ok := getStructNameAndFields(fset, decl)
 		if ok {
-			results[structName] = Tr("fields", handleFieldList(fset, structFields.List))
+			results[structName] = StructDef{
+				Name:   structName,
+				Fields: handleFieldList(fset, structFields.List),
+			}
 		}
 	}
 
@@ -174,21 +175,22 @@ func handleType(fset *token.FileSet, it ast.Expr) string {
 	}
 }
 
-func handleFieldList(fset *token.FileSet, it []*ast.Field) []Tree {
+func handleFieldList(fset *token.FileSet, it []*ast.Field) []FieldDef {
 
-	fields := []Tree{}
+	fields := []FieldDef{}
 
 	for _, fld := range it {
 
-		t := Tree{}
-
-		if len(fld.Names) > 0 {
-			t["name"] = fld.Names[0].Name
+		t := FieldDef{
+			Type: handleType(fset, fld.Type),
+			Tags: handleFieldTag(fset, fld.Tag),
 		}
 
-		t["type"] = handleType(fset, fld.Type)
-
-		t = t.merge(handleFieldTag(fset, fld.Tag))
+		if len(fld.Names) > 0 {
+			t.Name = fld.Names[0].Name
+		} else {
+			t.Name = t.Type
+		}
 
 		fields = append(fields, t)
 	}
@@ -196,17 +198,15 @@ func handleFieldList(fset *token.FileSet, it []*ast.Field) []Tree {
 	return fields
 }
 
-func handleFieldTag(fset *token.FileSet, it *ast.BasicLit) Tree {
+func handleFieldTag(fset *token.FileSet, it *ast.BasicLit) map[string]string {
 
-	r := Tree{}
+	result := map[string]string{}
 
 	if it == nil {
-		return r
+		return result
 	}
 
 	tag := reflect.StructTag(it.Value[1 : len(it.Value)-1])
-
-	tagValues := Tree{}
 
 	for _, t := range []string{
 		// see https://github.com/golang/go/wiki/Well-known-struct-tags
@@ -215,13 +215,9 @@ func handleFieldTag(fset *token.FileSet, it *ast.BasicLit) Tree {
 	} {
 		v, ok := tag.Lookup(t)
 		if ok {
-			tagValues[t] = v
+			result[t] = v
 		}
 	}
 
-	if len(tagValues) > 0 {
-		r["tags"] = tagValues
-	}
-
-	return r
+	return result
 }

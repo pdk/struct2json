@@ -1,6 +1,7 @@
 {
     "structs": [
         {
+            "name": "Bar",
             "fields": [
                 {
                     "name": "x",
@@ -10,10 +11,10 @@
                     "name": "y",
                     "type": "int"
                 }
-            ],
-            "name": "Bar"
+            ]
         },
         {
+            "name": "Foo",
             "fields": [
                 {
                     "name": "a",
@@ -21,10 +22,10 @@
                 },
                 {
                     "name": "b",
+                    "type": "string",
                     "tags": {
                         "db": "beta"
-                    },
-                    "type": "string"
+                    }
                 },
                 {
                     "name": "c",
@@ -32,11 +33,11 @@
                 },
                 {
                     "name": "d",
+                    "type": "[]string",
                     "tags": {
                         "db": "delta",
                         "json": "Delta"
-                    },
-                    "type": "[]string"
+                    }
                 },
                 {
                     "name": "e",
@@ -46,12 +47,13 @@
                     "name": "f",
                     "type": "map[int]Bar"
                 }
-            ],
-            "name": "Foo"
+            ]
         },
         {
+            "name": "Boink",
             "fields": [
                 {
+                    "name": "Foo",
                     "type": "Foo"
                 },
                 {
@@ -66,8 +68,7 @@
                     "name": "UpdatedByID",
                     "type": "int64"
                 }
-            ],
-            "name": "Boink"
+            ]
         }
     ]
 }
