@@ -1,10 +1,12 @@
 package struct2json
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"log"
 	"reflect"
 )
@@ -27,10 +29,44 @@ type Field struct {
 	Tags map[string]string `json:"tags,omitempty"`
 }
 
-// GetStructs parses a single .go file, finding all declared structs. If
-// structNames is empty, all structs are returned. If structNames is not empty,
-// then only those named are returned.
-func GetStructs(goFileName string, structNames []string) []Struct {
+// Append adds other structs to this Document
+func (doc *Document) Append(structs ...Struct) {
+	doc.Structs = append(doc.Structs, structs...)
+}
+
+// Get returns the Struct with the given name. The bool value indicates if the
+// given name was found or not.
+func (doc *Document) Get(name string) (Struct, bool) {
+	for _, s := range doc.Structs {
+		if s.Name == name {
+			return s, true
+		}
+	}
+
+	return Struct{}, false
+}
+
+// WriteJSON outputs a Document as JSON.
+func (doc *Document) WriteJSON(w io.Writer) {
+
+	output, err := json.MarshalIndent(doc, "", "    ")
+	if err != nil {
+		log.Fatalf("failed to struct definition(s): %v", err)
+	}
+
+	_, err = w.Write(output)
+	if err != nil {
+		log.Fatalf("failed to write JSON: %v", err)
+	}
+
+	_, err = w.Write([]byte("\n"))
+	if err != nil {
+		log.Fatalf("failed to write JSON: %v", err)
+	}
+}
+
+// GetStructs parses a single .go file, finding all declared/named structs.
+func GetStructs(goFileName string) Document {
 
 	fset := token.NewFileSet()
 	mode := parser.Mode(0)
@@ -40,34 +76,24 @@ func GetStructs(goFileName string, structNames []string) []Struct {
 		log.Fatalf("failed parsing %s: %v", goFileName, err)
 	}
 
-	structs := findStructs(fset, parsed.Decls)
-
-	result := []Struct{}
-
-	for structName, Struct := range structs {
-
-		if len(structNames) > 0 && !contains(structNames, structName) {
-			continue
-		}
-
-		result = append(result, Struct)
+	return Document{
+		Structs: findStructs(fset, parsed.Decls),
 	}
-
-	return result
 }
 
-func findStructs(fset *token.FileSet, decls []ast.Decl) map[string]Struct {
+func findStructs(fset *token.FileSet, decls []ast.Decl) []Struct {
 
-	results := map[string]Struct{}
+	results := []Struct{}
 
 	for _, decl := range decls {
 
 		structName, structFields, ok := getStructNameAndFields(fset, decl)
 		if ok {
-			results[structName] = Struct{
-				Name:   structName,
-				Fields: handleFieldList(fset, structFields.List),
-			}
+			results = append(results,
+				Struct{
+					Name:   structName,
+					Fields: handleFieldList(fset, structFields.List),
+				})
 		}
 	}
 
@@ -166,14 +192,4 @@ func handleFieldTag(fset *token.FileSet, it *ast.BasicLit) map[string]string {
 	}
 
 	return result
-}
-
-func contains(coll []string, item string) bool {
-	for _, each := range coll {
-		if each == item {
-			return true
-		}
-	}
-
-	return false
 }

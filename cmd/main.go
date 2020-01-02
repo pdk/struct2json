@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -43,13 +41,23 @@ func main() {
 	doc := struct2json.Document{}
 
 	for i, goFileName := range goFiles {
-		doc.Structs = append(doc.Structs, struct2json.GetStructs(goFileName, structNames[i])...)
+
+		found := struct2json.GetStructs(goFileName)
+
+		if len(structNames[i]) == 0 {
+			// if no particular names were specified for this go file, grab them
+			// all.
+			doc.Append(found.Structs...)
+			continue
+		}
+
+		for _, name := range structNames[i] {
+			s1, ok := found.Get(name)
+			if ok {
+				doc.Append(s1)
+			}
+		}
 	}
 
-	output, err := json.MarshalIndent(doc, "", "    ")
-	if err != nil {
-		log.Fatalf("failed to struct definition(s): %v", err)
-	}
-
-	fmt.Println(string(output))
+	doc.WriteJSON(os.Stdout)
 }
