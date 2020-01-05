@@ -36,7 +36,7 @@ func (doc *Document) Append(structs ...Struct) {
 
 // Get returns the Struct with the given name. The bool value indicates if the
 // given name was found or not.
-func (doc *Document) Get(name string) (Struct, bool) {
+func (doc Document) Get(name string) (Struct, bool) {
 	for _, s := range doc.Structs {
 		if s.Name == name {
 			return s, true
